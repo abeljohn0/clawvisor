@@ -533,6 +533,29 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 
 		_ = h.store.IncrementTaskRequestCount(ctx, req.TaskID)
 
+		// Deterministic param-level constraint check (runs BEFORE LLM verification
+		// so allowlist violations are blocked even if the verifier would have passed).
+		if match.MatchedAction != nil && len(match.MatchedAction.ParamsConstraints) > 0 {
+			if violationReason := CheckParamsConstraints(match.MatchedAction.ParamsConstraints, req.Params); violationReason != "" {
+				taskIDPtr := &req.TaskID
+				e := baseEntry("param_restriction", "restricted", taskIDPtr)
+				e.DurationMS = int(time.Since(start).Milliseconds())
+				e.ErrorMsg = &violationReason
+				if logErr := h.store.LogAudit(ctx, e); logErr != nil {
+					h.logger.Warn("audit log failed", "err", logErr)
+				}
+				h.publishAuditAndQueue(agent.UserID, req.TaskID)
+				writeJSON(w, http.StatusOK, map[string]any{
+					"status":     "restricted",
+					"request_id": req.RequestID,
+					"audit_id":   auditID,
+					"reason":     violationReason,
+					"code":       "PARAM_CONSTRAINT_VIOLATION",
+				})
+				return
+			}
+		}
+
 		// In scope + auto_execute + not hardcoded → execute directly
 		if match.AutoExecute && !hardcoded {
 			taskIDPtr := &req.TaskID

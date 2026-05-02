@@ -305,6 +305,12 @@ type TaskAction struct {
 	ResponseFilters    json.RawMessage `json:"response_filters,omitempty"`
 	ExpectedUse        string          `json:"expected_use,omitempty"`
 	ExpansionRationale string          `json:"expansion_rationale,omitempty"` // set from PendingReason when scope expansion is approved
+	// ParamsConstraints declares deterministic param-level rules that are
+	// enforced before LLM intent verification. Format:
+	//   {"<param>": {"in": [...]}, "not_in": [...], "eq": "...", "not_eq": "...", "regex": "..."}
+	// String comparisons are case-insensitive; array params require all
+	// elements to satisfy the constraint. See handlers.CheckParamsConstraints.
+	ParamsConstraints json.RawMessage `json:"params_constraints,omitempty"`
 }
 
 // PlannedCall is a concrete or templated API call that an agent declares at task
