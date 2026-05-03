@@ -876,15 +876,19 @@ func (s *Store) CreateTask(ctx context.Context, task *store.Task) error {
 	}
 	riskDetails := string(task.RiskDetails)
 	approvalRationale := string(task.ApprovalRationale)
+	var supersedes sql.NullString
+	if task.Supersedes != "" {
+		supersedes = sql.NullString{String: task.Supersedes, Valid: true}
+	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO tasks (id, user_id, agent_id, purpose, status, authorized_actions, planned_calls, callback_url,
 			expires_in_seconds, approved_at, expires_at, pending_action, pending_reason, lifetime,
-			risk_level, risk_details, approval_source, approval_rationale)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			risk_level, risk_details, approval_source, approval_rationale, supersedes)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 	`, task.ID, task.UserID, task.AgentID, task.Purpose, task.Status,
 		string(actionsJSON), string(plannedCallsJSON), task.CallbackURL, task.ExpiresInSeconds,
 		approvedAt, expiresAt, pendingActionJSON, task.PendingReason, task.Lifetime,
-		task.RiskLevel, riskDetails, task.ApprovalSource, approvalRationale)
+		task.RiskLevel, riskDetails, task.ApprovalSource, approvalRationale, supersedes)
 	return err
 }
 
@@ -893,16 +897,17 @@ func (s *Store) GetTask(ctx context.Context, id string) (*store.Task, error) {
 	var actionsStr, plannedCallsStr, createdAt string
 	var approvedAt, expiresAt, pendingActionStr *string
 	var riskDetailsStr, approvalRationaleStr string
+	var supersedes sql.NullString
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, user_id, agent_id, purpose, status, authorized_actions, planned_calls, callback_url,
 		       created_at, approved_at, expires_at, expires_in_seconds, request_count,
 		       pending_action, pending_reason, lifetime, risk_level, risk_details,
-		       approval_source, approval_rationale
+		       approval_source, approval_rationale, supersedes
 		FROM tasks WHERE id = ?
 	`, id).Scan(&t.ID, &t.UserID, &t.AgentID, &t.Purpose, &t.Status, &actionsStr,
 		&plannedCallsStr, &t.CallbackURL, &createdAt, &approvedAt, &expiresAt, &t.ExpiresInSeconds,
 		&t.RequestCount, &pendingActionStr, &t.PendingReason, &t.Lifetime,
-		&t.RiskLevel, &riskDetailsStr, &t.ApprovalSource, &approvalRationaleStr)
+		&t.RiskLevel, &riskDetailsStr, &t.ApprovalSource, &approvalRationaleStr, &supersedes)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -939,6 +944,9 @@ func (s *Store) GetTask(ctx context.Context, id string) (*store.Task, error) {
 	if approvalRationaleStr != "" {
 		t.ApprovalRationale = json.RawMessage(approvalRationaleStr)
 	}
+	if supersedes.Valid {
+		t.Supersedes = supersedes.String
+	}
 	return t, nil
 }
 
@@ -965,7 +973,7 @@ func (s *Store) ListTasks(ctx context.Context, userID string, filter store.TaskF
 	query := `SELECT id, user_id, agent_id, purpose, status, authorized_actions, planned_calls, callback_url,
 		       created_at, approved_at, expires_at, expires_in_seconds, request_count,
 		       pending_action, pending_reason, lifetime, risk_level, risk_details,
-		       approval_source, approval_rationale
+		       approval_source, approval_rationale, supersedes
 		FROM tasks ` + where + ` ORDER BY created_at DESC`
 
 	if filter.Limit > 0 {
@@ -985,10 +993,11 @@ func (s *Store) ListTasks(ctx context.Context, userID string, filter store.TaskF
 		var actionsStr, plannedCallsStr, createdAt string
 		var approvedAt, expiresAt, pendingActionStr *string
 		var riskDetailsStr, approvalRationaleStr string
+		var supersedes sql.NullString
 		if err := rows.Scan(&t.ID, &t.UserID, &t.AgentID, &t.Purpose, &t.Status, &actionsStr,
 			&plannedCallsStr, &t.CallbackURL, &createdAt, &approvedAt, &expiresAt, &t.ExpiresInSeconds,
 			&t.RequestCount, &pendingActionStr, &t.PendingReason, &t.Lifetime,
-			&t.RiskLevel, &riskDetailsStr, &t.ApprovalSource, &approvalRationaleStr); err != nil {
+			&t.RiskLevel, &riskDetailsStr, &t.ApprovalSource, &approvalRationaleStr, &supersedes); err != nil {
 			return nil, 0, err
 		}
 		t.CreatedAt = parseTime(createdAt)
@@ -1020,6 +1029,9 @@ func (s *Store) ListTasks(ctx context.Context, userID string, filter store.TaskF
 		}
 		if approvalRationaleStr != "" {
 			t.ApprovalRationale = json.RawMessage(approvalRationaleStr)
+		}
+		if supersedes.Valid {
+			t.Supersedes = supersedes.String
 		}
 		tasks = append(tasks, t)
 	}
@@ -1136,7 +1148,7 @@ func (s *Store) ListExpiredTasks(ctx context.Context) ([]*store.Task, error) {
 		       planned_calls, callback_url,
 		       created_at, approved_at, expires_at, expires_in_seconds, request_count,
 		       pending_action, pending_reason, lifetime, risk_level, risk_details,
-		       approval_source, approval_rationale
+		       approval_source, approval_rationale, supersedes
 		FROM tasks WHERE status = 'active' AND lifetime = 'session' AND expires_at < datetime('now')
 	`)
 	if err != nil {
@@ -1151,10 +1163,11 @@ func (s *Store) ListExpiredTasks(ctx context.Context) ([]*store.Task, error) {
 		var plannedCallsStr *string
 		var approvedAt, expiresAt, pendingActionStr *string
 		var riskDetailsStr, approvalRationaleStr string
+		var supersedes sql.NullString
 		if err := rows.Scan(&t.ID, &t.UserID, &t.AgentID, &t.Purpose, &t.Status, &actionsStr,
 			&plannedCallsStr, &t.CallbackURL, &createdAt, &approvedAt, &expiresAt, &t.ExpiresInSeconds,
 			&t.RequestCount, &pendingActionStr, &t.PendingReason, &t.Lifetime,
-			&t.RiskLevel, &riskDetailsStr, &t.ApprovalSource, &approvalRationaleStr); err != nil {
+			&t.RiskLevel, &riskDetailsStr, &t.ApprovalSource, &approvalRationaleStr, &supersedes); err != nil {
 			return nil, err
 		}
 		t.CreatedAt = parseTime(createdAt)
@@ -1186,6 +1199,9 @@ func (s *Store) ListExpiredTasks(ctx context.Context) ([]*store.Task, error) {
 		}
 		if approvalRationaleStr != "" {
 			t.ApprovalRationale = json.RawMessage(approvalRationaleStr)
+		}
+		if supersedes.Valid {
+			t.Supersedes = supersedes.String
 		}
 		tasks = append(tasks, t)
 	}

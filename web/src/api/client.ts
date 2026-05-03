@@ -400,6 +400,8 @@ export interface TaskAction {
   action: string
   auto_execute: boolean
   expected_use?: string
+  expansion_rationale?: string
+  params_constraints?: Record<string, Record<string, unknown>>
 }
 
 export interface PlannedCall {
@@ -430,6 +432,7 @@ export interface Task {
   risk_details?: RiskAssessment
   approval_source?: string
   approval_rationale?: ApprovalRationale
+  supersedes?: string
 }
 
 export interface ApprovalRationale {

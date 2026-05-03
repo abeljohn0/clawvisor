@@ -140,6 +140,11 @@ export default function TaskCard({
             {isActive && !isStanding && task.expires_at && <> &middot; <CountdownTimer expiresAt={task.expires_at} /></>}
             {!isActive && task.expires_in_seconds > 0 && ` · ${Math.round(task.expires_in_seconds / 60)}m`}
           </span>
+          {task.supersedes && (
+            <span className="text-xs font-mono text-text-tertiary" title={`Replaces task ${task.supersedes}`}>
+              &middot; Replaces {task.supersedes.slice(0, 8)}
+            </span>
+          )}
         </div>
       </div>
 
@@ -341,9 +346,40 @@ export default function TaskCard({
 
 // ── Scope group tables ───────────────────────────────────────────────────────
 
+// formatParamsConstraints renders a constraint map as a one-line summary like
+// "to: in [a@x.com, b@x.com] · amount: regex /^[0-9]+$/". Returns null when
+// the map is missing or empty so callers can avoid rendering anything.
+function formatParamsConstraints(pc?: Record<string, Record<string, unknown>>): string | null {
+  if (!pc) return null
+  const parts: string[] = []
+  for (const [param, ops] of Object.entries(pc)) {
+    if (!ops || typeof ops !== 'object') continue
+    for (const [op, value] of Object.entries(ops)) {
+      let rendered: string
+      if (Array.isArray(value)) {
+        rendered = `[${value.map(v => String(v)).join(', ')}]`
+      } else if (op === 'regex') {
+        rendered = `/${String(value)}/`
+      } else {
+        rendered = String(value)
+      }
+      parts.push(`${param}: ${op} ${rendered}`)
+    }
+  }
+  if (parts.length === 0) return null
+  return parts.join(' · ')
+}
+
+type ScopeAction = {
+  service: string
+  action: string
+  expected_use?: string
+  params_constraints?: Record<string, Record<string, unknown>>
+}
+
 function ScopeGroupTables({ autoActions, manualActions }: {
-  autoActions: { service: string; action: string; expected_use?: string }[]
-  manualActions: { service: string; action: string; expected_use?: string }[]
+  autoActions: ScopeAction[]
+  manualActions: ScopeAction[]
 }) {
   return (
     <>
@@ -355,12 +391,20 @@ function ScopeGroupTables({ autoActions, manualActions }: {
           </div>
           <table className="w-full text-sm">
             <tbody>
-              {autoActions.map((a, i) => (
-                <tr key={`${a.service}|${a.action}`} className={i < autoActions.length - 1 ? 'border-b border-border-subtle' : ''}>
-                  <td className="px-3 py-2 font-mono text-text-primary w-40">{serviceName(a.service)} · {actionName(a.action)}</td>
-                  <td className="px-3 py-2 text-sm text-text-secondary">{a.expected_use ?? ''}</td>
-                </tr>
-              ))}
+              {autoActions.map(({ service, action, expected_use, params_constraints }, i) => {
+                const constraints = formatParamsConstraints(params_constraints)
+                return (
+                  <tr key={`${service}|${action}`} className={i < autoActions.length - 1 ? 'border-b border-border-subtle' : ''}>
+                    <td className="px-3 py-2 font-mono text-text-primary w-40">{serviceName(service)} · {actionName(action)}</td>
+                    <td className="px-3 py-2 text-sm text-text-secondary">
+                      {expected_use ?? ''}
+                      {constraints && (
+                        <div className="mt-1 text-xs font-mono text-text-tertiary">{constraints}</div>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -373,12 +417,20 @@ function ScopeGroupTables({ autoActions, manualActions }: {
           </div>
           <table className="w-full text-sm">
             <tbody>
-              {manualActions.map((a, i) => (
-                <tr key={`${a.service}|${a.action}`} className={i < manualActions.length - 1 ? 'border-b border-border-subtle' : ''}>
-                  <td className="px-3 py-2 font-mono text-text-primary w-40">{serviceName(a.service)} · {actionName(a.action)}</td>
-                  <td className="px-3 py-2 text-sm text-text-secondary">{a.expected_use ?? ''}</td>
-                </tr>
-              ))}
+              {manualActions.map(({ service, action, expected_use, params_constraints }, i) => {
+                const constraints = formatParamsConstraints(params_constraints)
+                return (
+                  <tr key={`${service}|${action}`} className={i < manualActions.length - 1 ? 'border-b border-border-subtle' : ''}>
+                    <td className="px-3 py-2 font-mono text-text-primary w-40">{serviceName(service)} · {actionName(action)}</td>
+                    <td className="px-3 py-2 text-sm text-text-secondary">
+                      {expected_use ?? ''}
+                      {constraints && (
+                        <div className="mt-1 text-xs font-mono text-text-tertiary">{constraints}</div>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>

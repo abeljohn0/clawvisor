@@ -359,6 +359,11 @@ type Task struct {
 	// ApprovalSource indicates how the task was approved ("", "manual", "telegram_group", "telegram_button").
 	ApprovalSource    string          `json:"approval_source,omitempty"`
 	ApprovalRationale json.RawMessage `json:"approval_rationale,omitempty"`
+	// Supersedes is the ID of an existing active task this task replaces.
+	// On approval, the named task is automatically revoked. Use this to add or
+	// remove items from a standing task's allowlist by creating a fresh task
+	// rather than mutating the old one.
+	Supersedes string `json:"supersedes,omitempty"`
 }
 
 // PendingApproval is a gateway request awaiting human approval.

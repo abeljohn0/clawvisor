@@ -107,6 +107,7 @@ type createTaskRequest struct {
 	ExpiresInSeconds  int                 `json:"expires_in_seconds"`
 	CallbackURL       string              `json:"callback_url"`
 	Lifetime          string              `json:"lifetime"` // "session" (default) or "standing"
+	Supersedes        string              `json:"supersedes,omitempty"`
 }
 
 // Create declares a new task scope.
@@ -332,6 +333,7 @@ func (h *TasksHandler) Create(w http.ResponseWriter, r *http.Request) {
 		AuthorizedActions: req.AuthorizedActions,
 		PlannedCalls:      req.PlannedCalls,
 		ExpiresInSeconds:  expiresIn,
+		Supersedes:        req.Supersedes,
 	}
 	if req.CallbackURL != "" {
 		task.CallbackURL = &req.CallbackURL
@@ -702,6 +704,18 @@ func (h *TasksHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Atomically revoke the superseded task, if any. Best-effort: a failure
+	// here does not roll back the new task — the operator can manually clean
+	// up the old one if needed. ErrNotFound (task already revoked/expired) is
+	// not an error.
+	supersededID := task.Supersedes
+	if supersededID != "" {
+		if err := h.st.RevokeTask(ctx, supersededID, user.ID); err != nil && err != store.ErrNotFound {
+			h.logger.Warn("could not revoke superseded task",
+				"new_task_id", taskID, "superseded_task_id", supersededID, "err", err)
+		}
+	}
+
 	// Deliver callback if set.
 	if task.CallbackURL != nil && *task.CallbackURL != "" {
 		cbKey, _ := h.st.GetAgentCallbackSecret(ctx, task.AgentID)
@@ -722,6 +736,9 @@ func (h *TasksHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	}
 	if task.Lifetime != "standing" {
 		resp["expires_at"] = expiresAt.Format(time.RFC3339)
+	}
+	if supersededID != "" {
+		resp["superseded"] = supersededID
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

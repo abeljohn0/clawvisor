@@ -133,6 +133,8 @@ actions you need using `create_task`:
 - **`auto_execute`** — `true` runs in-scope requests immediately; `false` still requires per-request approval (use for destructive actions like `send_message`).
 - **`expires_in_seconds`** — task TTL. Omit and set `"lifetime": "standing"` for a task that persists until the user revokes it (see below).
 - **`planned_calls`** *(optional)* — pre-register specific API calls you know you'll make. Planned calls are shown to the user during approval, evaluated as part of risk assessment, and **skip intent verification at runtime** when they match. This reduces latency for predictable workflows. Each entry must be covered by `authorized_actions` and must include `params`. Use exact values for known params, or `"$chain"` for values that will come from a prior call's results (e.g. `{"thread_id": "$chain"}`). Calls without params cannot skip verification.
+- **`supersedes`** *(optional, standing tasks)* — the ID of an existing active task this one replaces. On approval, the named task is automatically revoked. Use this when adding/removing items from a standing task's allowlist (e.g. expanding a recipient list) — instead of mutating, create a fresh task with `supersedes: "<old_id>"`.
+- **`params_constraints`** *(optional, per-action)* — declarative param-level allowlist enforced before LLM verification. Format: `{"<param>": {"in": [...]}}` or `not_in`/`eq`/`not_eq`/`regex`. Use for deterministic rules like recipient allowlists, repo scoping, amount caps. Catches what LLM might miss; runs at sub-50ms with no API cost.
 
 ### Sizing scope to task complexity
 
@@ -168,7 +170,24 @@ curl -s -X POST "$CLAWVISOR_URL/api/tasks" \
     "lifetime": "standing",
     "authorized_actions": [
       {"service": "google.gmail:user@example.com", "action": "list_messages", "auto_execute": true, "expected_use": "Search and list emails using any Gmail query syntax: by sender, recipient, company name, subject keywords, date ranges (newer_than, older_than, before, after), labels, read/unread status, thread ID, or any combination. Used for inbox triage, follow-ups on hiring, intro status monitoring, deal research, investor correspondence tracking, scheduling and thread discovery, and any ad-hoc email search for any company, person, or topic at any time."},
-      {"service": "google.gmail:user@example.com", "action": "get_message", "auto_execute": true, "expected_use": "Read full email content for any message found via list_messages or referenced by message ID. Used to understand full context, extract action items, check reply status, draft summaries, track intro chains, audit follow-ups, and provide detailed email content to the user on request. Will read emails from any sender, about any topic, at any time as needed for triage, research, and executive assistant workflows."}
+      {"service": "google.gmail:user@example.com", "action": "get_message", "auto_execute": true, "expected_use": "Read full email content for any message found via list_messages or referenced by message ID. Used to understand full context, extract action items, check reply status, draft summaries, track intro chains, audit follow-ups, and provide detailed email content to the user on request. Will read emails from any sender, about any topic, at any time as needed for triage, research, and executive assistant workflows."},
+      {"service": "google.gmail:user@example.com", "action": "send_message", "auto_execute": false, "expected_use": "Send pre-drafted replies on the user's behalf, restricted to a small allowlist of internal recipients.", "params_constraints": {"to": {"in": ["sukrut@logosguard.com"]}}}
+    ]
+  }'
+```
+
+To later **expand the recipient allowlist**, do not mutate the existing task — create a new one with `supersedes` pointing at the old task ID. On approval, Clawvisor atomically revokes the old task:
+
+```bash
+curl -s -X POST "$CLAWVISOR_URL/api/tasks" \
+  -H "Authorization: Bearer $CLAWVISOR_AGENT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "purpose": "...same purpose as before...",
+    "lifetime": "standing",
+    "supersedes": "<old_task_id>",
+    "authorized_actions": [
+      {"service": "google.gmail:user@example.com", "action": "send_message", "auto_execute": false, "expected_use": "...", "params_constraints": {"to": {"in": ["sukrut@logosguard.com", "abel@logosguard.com"]}}}
     ]
   }'
 ```
