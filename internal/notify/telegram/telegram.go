@@ -732,6 +732,9 @@ func formatTaskApprovalMessage(req notify.TaskApprovalRequest) string {
 		sb.WriteString(fmt.Sprintf("  • %s (%s)\n",
 			html.EscapeString(display.FormatServiceAction(a.Service, a.Action)),
 			mode))
+		if line := formatParamsConstraintsLine(a.ParamsConstraints); line != "" {
+			sb.WriteString(fmt.Sprintf("    🔒 %s\n", line))
+		}
 	}
 
 	if len(req.PlannedCalls) > 0 {
@@ -760,12 +763,60 @@ func formatScopeExpansionMessage(req notify.ScopeExpansionRequest) string {
 	sb.WriteString(fmt.Sprintf("\n<b>New action:</b> %s (%s)\n",
 		html.EscapeString(display.FormatServiceAction(req.NewAction.Service, req.NewAction.Action)),
 		mode))
+	if line := formatParamsConstraintsLine(req.NewAction.ParamsConstraints); line != "" {
+		sb.WriteString(fmt.Sprintf("  🔒 %s\n", line))
+	}
 
 	if req.Reason != "" {
 		sb.WriteString(fmt.Sprintf("\n<b>Reason:</b> %s\n", html.EscapeString(req.Reason)))
 	}
 
 	return sb.String()
+}
+
+// formatParamsConstraintsLine renders a TaskAction's ParamsConstraints as a
+// short one-line summary suitable for Telegram. Returns empty string if no
+// constraints are set or the JSON is malformed.
+//
+// Example output: `to: in [sukrut@logosguard.com, alex@logosguard.com]`
+func formatParamsConstraintsLine(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var c map[string]map[string]any
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return ""
+	}
+	if len(c) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(c))
+	for paramName, ops := range c {
+		for op, val := range ops {
+			parts = append(parts, fmt.Sprintf("%s: %s %s",
+				html.EscapeString(paramName), op, html.EscapeString(formatConstraintValue(val))))
+		}
+	}
+	return strings.Join(parts, "; ")
+}
+
+func formatConstraintValue(v any) string {
+	switch x := v.(type) {
+	case []any:
+		strs := make([]string, 0, len(x))
+		for _, e := range x {
+			if s, ok := e.(string); ok {
+				strs = append(strs, s)
+			} else {
+				strs = append(strs, fmt.Sprint(e))
+			}
+		}
+		return "[" + strings.Join(strs, ", ") + "]"
+	case string:
+		return x
+	default:
+		return fmt.Sprint(v)
+	}
 }
 
 func formatConnectionRequestMessage(req notify.ConnectionRequest) string {
